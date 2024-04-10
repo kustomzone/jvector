@@ -51,21 +51,17 @@ class Header {
         int version;
         EnumSet<FeatureId> featureIds;
         EnumMap<FeatureId, Feature> features = new EnumMap<>(FeatureId.class);
-        int size;
-        int dimension;
-        int entryNode;
-        int maxDegree;
         CommonHeader common;
 
         if (maybeMagic != OnDiskGraphIndex.MAGIC) {
             // old format ODGI (DiskANN-style graph with inline full vectors)
+            // maybeMagic contains size
             version = 0;
-            size = maybeMagic;
             featureIds = EnumSet.of(FeatureId.INLINE_VECTORS);
-            dimension = reader.readInt();
-            entryNode = reader.readInt();
-            maxDegree = reader.readInt();
-            common = new CommonHeader(version, size, dimension, entryNode, maxDegree);
+            int dimension = reader.readInt();
+            int entryNode = reader.readInt();
+            int maxDegree = reader.readInt();
+            common = new CommonHeader(version, maybeMagic, dimension, entryNode, maxDegree);
         } else {
             common = CommonHeader.load(reader);
             featureIds = FeatureId.deserialize(reader.readInt());

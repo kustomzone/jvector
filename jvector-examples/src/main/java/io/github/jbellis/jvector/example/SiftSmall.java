@@ -24,6 +24,7 @@ import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.CachingGraphIndex;
+import io.github.jbellis.jvector.graph.disk.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
@@ -74,7 +75,7 @@ public class SiftSmall {
         CachingGraphIndex onDiskGraph = null;
         try (DataOutputStream outputFile = new DataOutputStream(new FileOutputStream(graphPath.toFile()))){
             var writer = new OnDiskGraphIndexWriter.Builder(onHeapGraph)
-                    .withInlineVectors(ravv).build();
+                    .with(new InlineVectors(ravv.dimension()).asWriter(ravv)).build();
 
             writer.write(outputFile);
             onDiskGraph = new CachingGraphIndex(OnDiskGraphIndex.load(ReaderSupplierFactory.open(graphPath), 0));

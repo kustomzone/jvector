@@ -126,7 +126,7 @@ public class OnDiskGraphIndex implements GraphIndex, AutoCloseable, Accountable
         return new View(readerSupplier.get());
     }
 
-    public class View implements GraphIndex.View, ScoringView, RandomAccessVectorValues {
+    public class View implements ScoringView, RandomAccessVectorValues {
         protected final RandomAccessReader reader;
         private final int[] neighbors;
 

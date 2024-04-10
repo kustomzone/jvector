@@ -18,38 +18,45 @@ package io.github.jbellis.jvector.graph.disk;
 
 import io.github.jbellis.jvector.disk.RandomAccessReader;
 
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.stream.Collectors;
 
 /**
  * An enum representing the features that can be stored in an on-disk graph index.
- * Order of this enum is critical! It will be serialized on-disk in enum order.
  * These are typically mapped to a Feature or FeatureWriter.
  */
 public enum FeatureId {
-    INLINE_VECTORS(InlineVectors::load),
-    FUSED_ADC(FusedADC::load),
-    LVQ(io.github.jbellis.jvector.graph.disk.LVQ::load);
+    INLINE_VECTORS(0, InlineVectors::load),
+    FUSED_ADC(1, FusedADC::load),
+    LVQ(2, io.github.jbellis.jvector.graph.disk.LVQ::load);
 
-    public static Set<FeatureId> ALL = Collections.unmodifiableSet(EnumSet.allOf(FeatureId.class));
+    public static final List<FeatureId> ALL_SORTED = Arrays.stream(FeatureId.values()).sorted(Comparator.comparingInt(a -> a.bitshift))
+            .collect(Collectors.toUnmodifiableList());
+    public static final Set<FeatureId> ALL = Collections.unmodifiableSet(EnumSet.allOf(FeatureId.class));
 
     private final BiFunction<CommonHeader, RandomAccessReader, Feature> loader;
+    private final int bitshift;
 
-    FeatureId(BiFunction<CommonHeader, RandomAccessReader, Feature> loader) {
+    FeatureId(int bitshift, BiFunction<CommonHeader, RandomAccessReader, Feature> loader) {
+        this.bitshift = bitshift;
         this.loader = loader;
     }
 
-    public Feature load(CommonHeader header, RandomAccessReader reader) {
+    Feature load(CommonHeader header, RandomAccessReader reader) {
         return loader.apply(header, reader);
     }
 
-    public static EnumSet<FeatureId> deserialize(int features) {
+    public static EnumSet<FeatureId> deserialize(int bitflags) {
         EnumSet<FeatureId> set = EnumSet.noneOf(FeatureId.class);
         for (int n = 0; n < values().length; n++) {
-            if ((features & (1 << n)) != 0)
-                set.add(values()[n]);
+            if ((bitflags & (1 << n)) != 0)
+                set.add(ALL_SORTED.get(n));
         }
         return set;
     }
@@ -57,7 +64,11 @@ public enum FeatureId {
     public static int serialize(EnumSet<FeatureId> flags) {
         int i = 0;
         for (FeatureId flag : flags)
-            i |= 1 << flag.ordinal();
+            i |= 1 << flag.bitshift;
         return i;
+    }
+
+    public int bitshift() {
+        return bitshift;
     }
 }

@@ -31,14 +31,19 @@ import java.io.UncheckedIOException;
 /**
  * Implements the storage of LVQ-quantized vectors in an on-disk graph index. These can be used for reranking.
  */
-class LVQ implements Feature {
+public class LVQ implements Feature {
     private static final VectorTypeSupport vectorTypeSupport = VectorizationProvider.getInstance().getVectorTypeSupport();
     private final LocallyAdaptiveVectorQuantization lvq;
     private final int lvqVectorSize;
 
-    LVQ(LocallyAdaptiveVectorQuantization lvq, int lvqVectorSize) {
+    public LVQ(LocallyAdaptiveVectorQuantization lvq, int lvqVectorSize) {
         this.lvq = lvq;
         this.lvqVectorSize = lvqVectorSize;
+    }
+
+    @Override
+    public FeatureId id() {
+        return FeatureId.LVQ;
     }
 
     @Override
@@ -60,8 +65,13 @@ class LVQ implements Feature {
         lvq.write(out);
     }
 
-    FeatureWriter asWriter(LocallyAdaptiveVectorQuantization.QuantizedVector[] lvqVectors) {
+    public FeatureWriter asWriter(LocallyAdaptiveVectorQuantization.QuantizedVector[] lvqVectors) {
         return new FeatureWriter() {
+            @Override
+            public FeatureId id() {
+                return LVQ.this.id();
+            }
+
             @Override
             public int inlineSize() {
                 return LVQ.this.inlineSize();
@@ -98,7 +108,7 @@ class LVQ implements Feature {
             try {
                 var bias = reader.readFloat();
                 var scale = reader.readFloat();
-                var packed = OnDiskGraphIndex.vectorTypeSupport.readByteSequence(reader, lvqVectorSize);
+                var packed = OnDiskGraphIndex.vectorTypeSupport.readByteSequence(reader, lvqVectorSize - 2 * Float.BYTES);
                 return new LocallyAdaptiveVectorQuantization.PackedVector(packed, bias, scale);
             } catch (IOException e) {
                 throw new RuntimeException(e);

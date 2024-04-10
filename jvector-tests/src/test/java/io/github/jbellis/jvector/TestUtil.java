@@ -21,6 +21,8 @@ import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.NodesIterator;
 import io.github.jbellis.jvector.graph.OnHeapGraphIndex;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
+import io.github.jbellis.jvector.graph.disk.FusedADC;
+import io.github.jbellis.jvector.graph.disk.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.pq.PQVectors;
 import io.github.jbellis.jvector.util.Bits;
@@ -126,18 +128,21 @@ public class TestUtil {
         try (var out = openFileForWriting(outputPath))
         {
             var writer = new OnDiskGraphIndexWriter.Builder(graph)
-                    .withInlineVectors(vectors).build();
+                    .with(new InlineVectors(vectors.dimension()).asWriter(vectors)).build();
             writer.write(out);
         }
     }
 
     public static void writeFusedGraph(GraphIndex graph, RandomAccessVectorValues vectors, PQVectors pq, Path outputPath) throws IOException {
-        try (var out = openFileForWriting(outputPath))
+        try (var out = openFileForWriting(outputPath);
+             var view = graph.getView())
         {
             var writer = new OnDiskGraphIndexWriter.Builder(graph)
-                    .withInlineVectors(vectors)
-                    .withFusedADC(pq).build();
+                    .with(new InlineVectors(vectors.dimension()).asWriter(vectors))
+                    .with(new FusedADC(graph.maxDegree(), pq.getProductQuantization()).asWriter(view, pq)).build();
             writer.write(out);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 

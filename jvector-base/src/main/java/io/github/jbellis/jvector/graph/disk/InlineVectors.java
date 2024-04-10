@@ -27,12 +27,17 @@ import java.io.IOException;
 /**
  * Implements the storage of full-resolution vectors inline into an OnDiskGraphIndex. These can be used for exact scoring.
  */
-class InlineVectors implements Feature {
+public class InlineVectors implements Feature {
     private static final VectorTypeSupport vectorTypeSupport = VectorizationProvider.getInstance().getVectorTypeSupport();
     private final int dimension;
 
-    InlineVectors(int dimension) {
+    public InlineVectors(int dimension) {
         this.dimension = dimension;
+    }
+
+    @Override
+    public FeatureId id() {
+        return FeatureId.INLINE_VECTORS;
     }
 
     @Override
@@ -49,8 +54,13 @@ class InlineVectors implements Feature {
         // common header contains dimension, which is sufficient
     }
 
-    FeatureWriter asWriter(RandomAccessVectorValues ravv) {
+    public FeatureWriter asWriter(RandomAccessVectorValues ravv) {
         return new FeatureWriter() {
+            @Override
+            public FeatureId id() {
+                return InlineVectors.this.id();
+            }
+
             @Override
             public int inlineSize() {
                 return InlineVectors.this.inlineSize();

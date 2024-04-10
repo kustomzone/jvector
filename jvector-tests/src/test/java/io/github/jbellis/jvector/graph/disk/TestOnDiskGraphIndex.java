@@ -112,8 +112,7 @@ public class TestOnDiskGraphIndex extends RandomizedTest {
         try (var indexOutputWriter = TestUtil.openFileForWriting(outputPath))
         {
             var writer = new OnDiskGraphIndexWriter.Builder(original, oldToNewMap)
-                    .withInlineVectors(ravv)
-                    .build();
+                    .with(new InlineVectors(ravv.dimension()).asWriter(ravv)).build();
             writer.write(indexOutputWriter);
         }
         // check that written graph ordinals match the new ones
@@ -148,7 +147,7 @@ public class TestOnDiskGraphIndex extends RandomizedTest {
         try (var indexOutputWriter = TestUtil.openFileForWriting(outputPath))
         {
             var writer = new OnDiskGraphIndexWriter.Builder(original, oldToNewMap)
-                    .withInlineVectors(ravv)
+                    .with(new InlineVectors(ravv.dimension()).asWriter(ravv))
                     .build();
             writer.write(indexOutputWriter);
         }

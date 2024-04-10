@@ -25,6 +25,9 @@ import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.graph.disk.CachingGraphIndex;
+import io.github.jbellis.jvector.graph.disk.FusedADC;
+import io.github.jbellis.jvector.graph.disk.InlineVectors;
+import io.github.jbellis.jvector.graph.disk.LVQ;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
@@ -99,6 +102,7 @@ public class Grid {
                             Path testDirectory) throws IOException
     {
         var floatVectors = ds.getBaseRavv();
+        var dimension = ds.getDimension();
         GraphIndexBuilder builder;
         if (buildCompressor == null) {
             var bsp = BuildScoreProvider.randomAccessScoreProvider(floatVectors, ds.similarityFunction);
@@ -128,14 +132,14 @@ public class Grid {
         try {
             try (var outputStream = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(graphPath)))) {
                 var writer = new OnDiskGraphIndexWriter.Builder(onHeapGraph)
-                        .withInlineVectors(floatVectors).build();
+                        .with(new InlineVectors(floatVectors.dimension()).asWriter(floatVectors)).build();
                 writer.write(outputStream);
             }
 
             var lvq = LocallyAdaptiveVectorQuantization.compute(floatVectors);
             try (var outputStream = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(lvqGraphPath)))) {
                 var writer = new OnDiskGraphIndexWriter.Builder(onHeapGraph)
-                        .withLVQVectors(lvq, lvq.encodeAll(ds.baseVectors)).build();
+                        .with(new LVQ(lvq, dimension% 64 == 0 ? dimension : (dimension / 64 + 1) * 64 + 2 * Float.BYTES).asWriter(lvq.encodeAll(ds.baseVectors))).build();
                 writer.write(outputStream);
             }
 
@@ -152,9 +156,12 @@ public class Grid {
                     System.out.format("%s encoded %d vectors [%.2f MB] in %.2fs%n", compressor, ds.baseVectors.size(), (cv.ramBytesUsed() / 1024f / 1024f), (System.nanoTime() - start) / 1_000_000_000.0);
 
                     if (fusedCompatible) {
-                        try (var outputStream = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(fusedGraphPath)))) {
+                        try (var outputStream = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(fusedGraphPath)));
+                             var view = onHeapGraph.getView()) {
                             var writer = new OnDiskGraphIndexWriter.Builder(onHeapGraph)
-                                    .withFusedADC((PQVectors) cv).withLVQVectors(lvq, lvq.encodeAll(ds.baseVectors)).build();
+                                    .with(new LVQ(lvq, dimension% 64 == 0 ? dimension : (dimension / 64 + 1) * 64 + 2 * Float.BYTES).asWriter(lvq.encodeAll(ds.baseVectors)))
+                                    .with(new FusedADC(onHeapGraph.maxDegree(), ((PQVectors) cv).getProductQuantization()).asWriter(view, (PQVectors) cv))
+                                    .build();
                             writer.write(outputStream);
                         }
                     }
@@ -270,6 +277,8 @@ public class Grid {
                 var searcher = cs.getSearcher();
                 var sf = cs.scoreProviderFor(queryVector, searcher.getView());
                 sr = searcher.search(sf, efSearch, Bits.ALL);
+
+                // process search result
                 var gt = cs.ds.groundTruth.get(i);
                 var n = topKCorrect(topK, sr.getNodes(), gt);
                 topKfound.add(n);

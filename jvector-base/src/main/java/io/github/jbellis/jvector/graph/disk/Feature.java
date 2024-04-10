@@ -23,6 +23,7 @@ import java.io.IOException;
  * A feature of an on-disk graph index. Information to use a feature is stored in the header on-disk.
  */
 interface Feature {
+    FeatureId id();
     int inlineSize();
     void writeHeader(DataOutput out) throws IOException;
 }

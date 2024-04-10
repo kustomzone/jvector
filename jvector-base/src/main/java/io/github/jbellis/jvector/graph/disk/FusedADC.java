@@ -35,16 +35,21 @@ import java.io.UncheckedIOException;
 /**
  * Implements Quick ADC-style scoring by fusing PQ-encoded neighbors into an OnDiskGraphIndex.
  */
-class FusedADC implements Feature {
+public class FusedADC implements Feature {
     private static final VectorTypeSupport vectorTypeSupport = VectorizationProvider.getInstance().getVectorTypeSupport();
     private final ProductQuantization pq;
     private final int maxDegree;
     private final ThreadLocal<VectorFloat<?>> reusableResults;
 
-    FusedADC(int maxDegree, ProductQuantization pq) {
+    public FusedADC(int maxDegree, ProductQuantization pq) {
         this.maxDegree = maxDegree;
         this.pq = pq;
         this.reusableResults = ThreadLocal.withInitial(() -> OnDiskGraphIndex.vectorTypeSupport.createFloatVector(maxDegree));
+    }
+
+    @Override
+    public FeatureId id() {
+        return FeatureId.FUSED_ADC;
     }
 
     @Override
@@ -70,9 +75,14 @@ class FusedADC implements Feature {
         pq.write(out);
     }
 
-    FeatureWriter asWriter(GraphIndex.View view, PQVectors pqVectors, int maxDegree) {
+    public FeatureWriter asWriter(GraphIndex.View view, PQVectors pqVectors) {
         ByteSequence<?> compressedNeighbors = vectorTypeSupport.createByteSequence(pqVectors.getCompressedSize() * maxDegree);
         return new FeatureWriter() {
+            @Override
+            public FeatureId id() {
+                return FusedADC.this.id();
+            }
+
             @Override
             public int inlineSize() {
                 return FusedADC.this.inlineSize();

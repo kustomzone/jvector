@@ -18,9 +18,6 @@ package io.github.jbellis.jvector.graph.disk;
 
 import io.github.jbellis.jvector.graph.GraphIndex;
 import io.github.jbellis.jvector.graph.OnHeapGraphIndex;
-import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
-import io.github.jbellis.jvector.pq.LocallyAdaptiveVectorQuantization;
-import io.github.jbellis.jvector.pq.PQVectors;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.Int2IntHashMap;
@@ -30,7 +27,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
-import java.util.EnumSet;
 import java.util.Map;
 
 /**
@@ -40,31 +36,12 @@ public class OnDiskGraphIndexWriter {
     private static final VectorTypeSupport vectorTypeSupport = VectorizationProvider.getInstance().getVectorTypeSupport();
     private final GraphIndex graph;
     private final Map<Integer, Integer> oldToNewOrdinals;
-    private PQVectors pqVectors;
-    private RandomAccessVectorValues ravv;
-    private LocallyAdaptiveVectorQuantization lvq;
-    private LocallyAdaptiveVectorQuantization.QuantizedVector[] lvqVectors;
-    private EnumSet<FeatureId> featureIds = EnumSet.noneOf(FeatureId.class);
+    private EnumMap<FeatureId, FeatureWriter> features;
 
-    private OnDiskGraphIndexWriter(GraphIndex graph, Map<Integer, Integer> oldToNewOrdinals,
-                                   PQVectors pqVectors, RandomAccessVectorValues ravv, LocallyAdaptiveVectorQuantization lvq,
-                                   LocallyAdaptiveVectorQuantization.QuantizedVector[] lvqVectors) {
+    private OnDiskGraphIndexWriter(GraphIndex graph, Map<Integer, Integer> oldToNewOrdinals, EnumMap<FeatureId, FeatureWriter> features) {
         this.graph = graph;
         this.oldToNewOrdinals = oldToNewOrdinals;
-        this.pqVectors = pqVectors;
-        this.ravv = ravv;
-        this.lvq = lvq;
-        this.lvqVectors = lvqVectors;
-        if (ravv != null) {
-            featureIds.add(FeatureId.INLINE_VECTORS);
-        }
-        if (pqVectors != null) {
-            featureIds.add(FeatureId.FUSED_ADC);
-        }
-        if (lvq != null) {
-            featureIds.add(FeatureId.LVQ);
-        }
-
+        this.features = features;
     }
 
     public void write(DataOutput out) throws IOException
@@ -88,28 +65,19 @@ public class OnDiskGraphIndexWriter {
         }
 
         int dimension = 0;
-        if (ravv != null) {
-            dimension = ravv.dimension();
-        } else if (lvq != null) {
-            dimension = lvq.globalMean.length();
+        if (features.containsKey(FeatureId.INLINE_VECTORS)) {
+            dimension = features.get(FeatureId.INLINE_VECTORS).inlineSize() / Float.BYTES;
+        } else if (features.containsKey(FeatureId.LVQ)) {
+            dimension = features.get(FeatureId.LVQ).inlineSize();
         }
 
         try (var view = graph.getView()) {
             // graph-level properties
             var commonHeader = new CommonHeader(OnDiskGraphIndex.CURRENT_VERSION, graph.size(), dimension, view.entryNode(), graph.maxDegree());
-            var featureWriters = new EnumMap<FeatureId, FeatureWriter>(FeatureId.class);
-            if (ravv != null) {
-                featureWriters.put(FeatureId.INLINE_VECTORS, new InlineVectors(dimension).asWriter(ravv));
-            }
-            if (pqVectors != null) {
-                featureWriters.put(FeatureId.FUSED_ADC, new FusedADC(commonHeader.maxDegree, pqVectors.getProductQuantization())
-                        .asWriter(view, pqVectors, graph.maxDegree()));
-            }
-            if (lvq != null) {
-                featureWriters.put(FeatureId.LVQ, new LVQ(lvq, dimension).asWriter(lvqVectors));
-            }
-            var header = new Header(commonHeader, featureWriters);
+            var header = new Header(commonHeader, features);
             header.write(out);
+
+            var orderedFeatures = features.values().stream().sorted(Comparator.comparingInt(f -> f.id().bitshift())).toArray(FeatureWriter[]::new);
 
             // for each graph node, write the associated vector and its neighbors
             for (int i = 0; i < oldToNewOrdinals.size(); i++) {
@@ -122,7 +90,7 @@ public class OnDiskGraphIndexWriter {
 
                 out.writeInt(newOrdinal); // unnecessary, but a reasonable sanity check
 
-                for (var feature : featureWriters.values()) {
+                for (var feature : orderedFeatures) {
                     feature.writeInline(originalOrdinal, out);
                 }
 
@@ -168,12 +136,9 @@ public class OnDiskGraphIndexWriter {
      * Builder for OnDiskGraphIndexWriter, with optional features.
      */
     public static class Builder {
-        private GraphIndex graphIndex;
-        private Map<Integer, Integer> oldToNewOrdinals;
-        private PQVectors pqVectors = null;
-        private RandomAccessVectorValues ravv = null;
-        private LocallyAdaptiveVectorQuantization lvq = null;
-        private LocallyAdaptiveVectorQuantization.QuantizedVector[] lvqVectors = null;
+        private final GraphIndex graphIndex;
+        private final Map<Integer, Integer> oldToNewOrdinals;
+        private final EnumMap<FeatureId, FeatureWriter> features;
 
         public Builder(GraphIndex graphIndex) {
             this(graphIndex, getSequentialRenumbering(graphIndex));
@@ -182,29 +147,19 @@ public class OnDiskGraphIndexWriter {
         public Builder(GraphIndex graphIndex, Map<Integer, Integer> oldToNewOrdinals) {
             this.graphIndex = graphIndex;
             this.oldToNewOrdinals = oldToNewOrdinals;
+            this.features = new EnumMap<>(FeatureId.class);
         }
 
-        public Builder withFusedADC(PQVectors pqVectors) {
-            this.pqVectors = pqVectors;
-            return this;
-        }
-
-        public Builder withInlineVectors(RandomAccessVectorValues vectors) {
-            this.ravv = vectors;
-            return this;
-        }
-
-        public Builder withLVQVectors(LocallyAdaptiveVectorQuantization lvq, LocallyAdaptiveVectorQuantization.QuantizedVector[] lvqVectors) {
-            this.lvq = lvq;
-            this.lvqVectors = lvqVectors;
+        public Builder with(FeatureWriter writer) {
+            features.put(writer.id(), writer);
             return this;
         }
 
         public OnDiskGraphIndexWriter build() {
-            if (pqVectors != null && lvq == null && ravv == null) {
+            if (features.containsKey(FeatureId.FUSED_ADC) && !(features.containsKey(FeatureId.LVQ) || features.containsKey(FeatureId.INLINE_VECTORS))) {
                 throw new IllegalArgumentException("Fused ADC requires an exact score source.");
             }
-            return new OnDiskGraphIndexWriter(graphIndex, oldToNewOrdinals, pqVectors, ravv, lvq, lvqVectors);
+            return new OnDiskGraphIndexWriter(graphIndex, oldToNewOrdinals, features);
         }
     }
 }
